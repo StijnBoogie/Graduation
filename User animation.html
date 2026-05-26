@@ -1,0 +1,1348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Vigil — Applying the sensor (user-test)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+  :root{
+    --bg:#F5F5F2;
+    --ink:#1a1a1a;
+    --muted:#6b6b66;
+    --line:#d8d8d2;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bot: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden;overscroll-behavior:none;}
+  body{min-height:100dvh;}
+  #stage{position:fixed;inset:0;}
+  canvas{display:block;}
+
+  /* ---------- Top bar (compact, portrait-friendly) ---------- */
+  .topbar{
+    position:fixed;top:0;left:0;right:0;
+    padding:calc(var(--safe-top) + 14px) 20px 12px;
+    z-index:10;pointer-events:none;
+    background:linear-gradient(180deg, rgba(245,245,242,0.95) 0%, rgba(245,245,242,0.7) 70%, rgba(245,245,242,0) 100%);
+  }
+  .brand-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;}
+  .brand{font-weight:600;letter-spacing:.02em;font-size:11px;text-transform:uppercase;color:var(--ink);display:flex;align-items:center;gap:8px;}
+  .brand .dot{width:7px;height:7px;border-radius:50%;background:#1a1a1a;}
+  .counter{font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted);letter-spacing:.06em;}
+  .steps{display:grid;grid-template-columns:repeat(9,1fr);gap:4px;pointer-events:auto;}
+  .step-pip{height:3px;background:#e3e3dd;border-radius:2px;position:relative;overflow:hidden;cursor:pointer;transition:height .2s ease;}
+  .step-pip:hover{height:5px;}
+  .step-pip .fill{position:absolute;inset:0;background:#1a1a1a;transform:scaleX(0);transform-origin:left;transition:transform .25s ease;}
+  .step-pip.done .fill{transform:scaleX(1);}
+  .step-pip.current .fill{transform:scaleX(var(--p,0));transition:none;}
+
+  /* ---------- Bottom (stacked: text → controls) ---------- */
+  .bottom{
+    position:fixed;left:0;right:0;bottom:0;
+    padding:20px 24px calc(var(--safe-bot) + 18px);
+    pointer-events:none;z-index:10;
+    background:linear-gradient(0deg, rgba(245,245,242,0.97) 0%, rgba(245,245,242,0.85) 60%, rgba(245,245,242,0) 100%);
+    display:flex;flex-direction:column;gap:18px;
+  }
+  .info{pointer-events:auto;}
+  .step-num{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:10px;}
+  .step-num .num{background:#1a1a1a;color:#fff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:0;font-weight:600;}
+  .title{font-size:26px;line-height:1.15;font-weight:600;letter-spacing:-.01em;margin:0 0 6px 0;}
+  .instr{font-size:14px;line-height:1.45;color:var(--muted);margin:0;text-wrap:pretty;}
+
+  .controls{pointer-events:auto;display:flex;gap:10px;align-items:center;justify-content:center;}
+  .btn{width:46px;height:46px;border-radius:50%;background:#fff;border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .12s ease,background .12s ease,border-color .12s ease;color:#1a1a1a;flex-shrink:0;}
+  .btn:active{transform:scale(.94);background:#1a1a1a;color:#fff;border-color:#1a1a1a;}
+  .btn.play{width:58px;height:58px;background:#1a1a1a;color:#fff;border-color:#1a1a1a;}
+  .btn svg{width:16px;height:16px;}
+  .btn.play svg{width:20px;height:20px;}
+
+  .donecard{position:fixed;top:20%;left:50%;transform:translateX(-50%);background:rgba(255,255,255,0.94);backdrop-filter:blur(6px);border:1px solid var(--line);padding:18px 22px;border-radius:14px;width:calc(100% - 48px);max-width:340px;text-align:center;opacity:0;transition:opacity .5s ease;pointer-events:none;z-index:5;}
+  .donecard.on{opacity:1;pointer-events:auto;}
+  .donecard .check{width:34px;height:34px;border-radius:50%;background:#1a1a1a;color:#fff;display:inline-flex;align-items:center;justify-content:center;margin-bottom:8px;}
+  .donecard h3{margin:0 0 4px 0;font-size:17px;font-weight:600;letter-spacing:-.01em;}
+  .donecard p{margin:0 0 14px;font-size:12px;line-height:1.45;color:var(--muted);}
+  .startbtn{display:inline-block;width:100%;padding:12px 18px;border-radius:12px;border:none;background:#1a1a1a;color:#fff;font-family:inherit;font-size:14px;font-weight:600;letter-spacing:-.01em;cursor:pointer;transition:transform .12s ease,background .12s ease;}
+  .startbtn:active{transform:scale(.97);background:#000;}
+
+  /* Embedded mode (?embed=1): the host screen provides its own header,
+     so hide the internal top bar and reclaim that vertical space. */
+  body.embed .topbar{display:none;}
+
+  /* ---------- Landscape / wider screens: revert to side-by-side ---------- */
+  @media (min-width: 720px) and (orientation: landscape){
+    .topbar{padding:22px 28px 0 28px;display:flex;align-items:center;gap:18px;background:none;}
+    .brand-row{margin-bottom:0;}
+    .steps{flex:1;}
+    .step-pip{height:4px;}
+    .bottom{flex-direction:row;align-items:flex-end;justify-content:space-between;gap:24px;padding:22px 28px 24px;background:none;}
+    .info{max-width:min(640px,55vw);}
+    .title{font-size:28px;}
+    .instr{font-size:15px;max-width:48ch;}
+    .controls{justify-content:flex-end;}
+  }
+</style>
+</head>
+<body>
+<script>
+  // When embedded inside a host shell (e.g. the SetupScreen iframe wrapper),
+  // hide the internal top bar so the host's header isn't duplicated.
+  if (new URLSearchParams(location.search).get('embed') === '1') {
+    document.documentElement.classList.add('embed');
+    document.addEventListener('DOMContentLoaded', () => document.body.classList.add('embed'));
+  }
+</script>
+<div id="stage"></div>
+
+<div class="topbar">
+  <div class="brand-row">
+    <div class="brand"><span class="dot"></span><span>Vigil · Setup guide</span></div>
+    <div class="counter" id="counter">01 / 09</div>
+  </div>
+  <div class="steps" id="steps"></div>
+</div>
+
+<div class="bottom">
+  <div class="info">
+    <div class="step-num"><span class="num" id="numbox">1</span><span id="numlabel">Step 1 of 9</span></div>
+    <h1 class="title" id="title">The battery</h1>
+    <p class="instr" id="instr">Place your e-bike battery on a flat surface.</p>
+  </div>
+  <div class="controls">
+    <button class="btn" id="restart" title="Restart">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+    </button>
+    <button class="btn" id="prev" title="Previous">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <button class="btn play" id="playpause" title="Play / Pause">
+      <svg id="playicon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5l14 7-14 7z"/></svg>
+      <svg id="pauseicon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+    </button>
+    <button class="btn" id="next" title="Next">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="donecard" id="donecard">
+  <div class="check">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+  </div>
+  <h3>You're set.</h3>
+  <p>Vigil is applied to your battery. Tap below to start watching for safety.</p>
+  <button class="startbtn" id="startbtn" type="button">Start Safety</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+//  VIGIL — sensor application 3D walkthrough
+// ============================================================
+
+const STEPS = [
+  { title:"The battery", instr:"Place your e-bike battery on a flat surface so the top face is upward." },
+  { title:"Position Vigil", instr:"The denim Vigil patch sits across the top of the battery." },
+  { title:"Flip the patch over", instr:"Two white paper strips cover the adhesive on the underside of each side flap." },
+  { title:"Peel the first strip", instr:"Lift one paper strip away to expose the adhesive on that flap." },
+  { title:"Align over the battery", instr:"Use the side groove and the ends of the battery as alignment cues." },
+  { title:"Stick the first side", instr:"Press the exposed flap down against the battery — the other flap stays lifted." },
+  { title:"Peel the second strip", instr:"Lift the remaining paper strip off the still-raised flap." },
+  { title:"Press the second side down", instr:"Press the second flap onto the battery so Vigil wraps both sides." },
+  { title:"Done", instr:"Connect the app to your sensor with your personal code." },
+];
+
+// User-test build: each step holds for STEP_HOLD_MS after its animation
+// completes before auto-advancing. Pause/play still works during the hold.
+const STEP_HOLD_MS = 6000;
+
+// ---------- Three.js setup ----------
+const stage = document.getElementById('stage');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xF5F5F2);
+
+const camera = new THREE.PerspectiveCamera(34, 16/9, 0.1, 100);
+const camTarget = new THREE.Vector3(0, 0.45, 0);
+camera.position.set(5.4, 3.6, 6.6);
+camera.lookAt(camTarget);
+
+// Portrait-aware: in narrow viewports we pull the camera back along its
+// view vector so the battery still fits horizontally instead of clipping.
+let portraitDistanceScale = 1;
+function computePortraitScale(aspect){
+  // In a 16:9 view (aspect ~1.78) the original framing already fits.
+  // At iPhone 16 portrait (~0.46) we need ~1.85× distance to keep the
+  // model on-screen with the same vFOV.
+  if (aspect >= 1.4) return 1;
+  // Lerp between 1.0 (aspect 1.4) and 1.95 (aspect 0.45).
+  const t = Math.max(0, Math.min(1, (1.4 - aspect) / (1.4 - 0.45)));
+  return 1 + t * 0.95;
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+stage.appendChild(renderer.domElement);
+
+// Cached "logical" camera position (what tweens write to). The actual
+// camera.position is this scaled out for portrait viewports.
+const logicalCamPos = new THREE.Vector3().copy(camera.position);
+
+function applyPortraitFraming(){
+  // Direction from target → logical position, then scaled.
+  const dir = new THREE.Vector3().subVectors(logicalCamPos, camTarget);
+  dir.multiplyScalar(portraitDistanceScale);
+  camera.position.copy(camTarget).add(dir);
+  camera.lookAt(camTarget);
+}
+
+function resize(){
+  const w = stage.clientWidth, h = stage.clientHeight;
+  const aspect = w/h;
+  camera.aspect = aspect;
+  // For very tall viewports, also bump the vertical FOV a touch so the
+  // model has breathing room above and below.
+  camera.fov = aspect < 1 ? 38 : 34;
+  portraitDistanceScale = computePortraitScale(aspect);
+  applyPortraitFraming();
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h, true);
+}
+window.addEventListener('resize', resize); resize();
+
+// ---------- Lights (soft studio) ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0xe7e6df, 0.35));
+const key = new THREE.DirectionalLight(0xffffff, 0.75);
+key.position.set(4, 6, 3); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+const c = key.shadow.camera; c.left=-4; c.right=4; c.top=4; c.bottom=-4; c.near=0.5; c.far=16;
+key.shadow.bias = -0.0005;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xfff5ea, 0.25);
+fill.position.set(-4, 2.5, 1.5); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffffff, 0.35);
+rim.position.set(-1.5, 3, -3); scene.add(rim);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.ShadowMaterial({ opacity: 0.14 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.position.y = -0.0005;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ============================================================
+//  BATTERY  — octagonal cross-section, chamfered ends
+// ============================================================
+// Cross-section (looking along the long axis):
+//
+//        ┌─────┐         narrow flat top (top_w)
+//       /       \        chamfered shoulders (top)
+//      |         |       vertical body (body_w)
+//       \       /        chamfered shoulders (bottom)
+//        └─────┘         narrow flat bottom (bot_w)
+//
+// Battery sits with bottom plateau on y=0. The chamfered bottom-shoulders
+// create the two angled feet seen in the references.
+//
+// The ends (along X) are also chamfered: cross-section scales down to ~0.92
+// over a short end-cap length, giving the octagonal end faces.
+
+const BAT = {
+  length: 3.4,     // along X — total length including end caps
+  end_cap: 0.18,   // length of each angled end cap
+  height: 0.95,    // total Y
+  top_w:  0.78,    // top plateau width (Z)
+  body_w: 1.06,    // mid body width (Z)
+  bot_w:  0.86,    // bottom plateau width (Z)
+  shoulder_top: 0.24, // height of top chamfer
+  shoulder_bot: 0.16, // height of bottom chamfer
+};
+
+// Build the 2D cross-section as a Shape (in XY, X=Z-coord, Y=height)
+function batteryCrossSection(scale = 1){
+  const wb = BAT.body_w/2 * scale, wt = BAT.top_w/2 * scale, wbot = BAT.bot_w/2 * scale;
+  const h  = BAT.height, stop = BAT.shoulder_top, sbot = BAT.shoulder_bot;
+  const s = new THREE.Shape();
+  // counter-clockwise from bottom-left of the bottom plateau
+  s.moveTo(-wbot, 0);
+  s.lineTo( wbot, 0);
+  s.lineTo( wb,   sbot);                 // chamfer up-out (bottom-right)
+  s.lineTo( wb,   h - stop);             // vertical body
+  s.lineTo( wt,   h);                    // chamfer up-in (top-right)
+  s.lineTo(-wt,   h);                    // top plateau
+  s.lineTo(-wb,   h - stop);             // chamfer down-in (top-left)
+  s.lineTo(-wb,   sbot);                 // vertical body left
+  s.lineTo(-wbot, 0);                    // chamfer down-out (bottom-left)
+  return s;
+}
+
+function buildBatteryGeometry(){
+  // Build by stitching together a series of cross-sections along X.
+  // Cross-section scales: tip → 0.92, then ramps to 1.0 over end_cap, holds, ramps back down.
+  const L = BAT.length, ec = BAT.end_cap;
+  const stops = [
+    { x: -L/2,        scale: 0.86 },
+    { x: -L/2 + ec,   scale: 1.00 },
+    { x:  L/2 - ec,   scale: 1.00 },
+    { x:  L/2,        scale: 0.86 },
+  ];
+
+  // Sample each cross-section, then assemble triangle strips between consecutive cross-sections.
+  const SEGMENTS = 1; // points per polygon edge
+  function samplePoints(scale){
+    const shape = batteryCrossSection(scale);
+    return shape.getPoints(SEGMENTS);
+  }
+
+  const ringPts = stops.map(s => samplePoints(s.scale));
+  const N = ringPts[0].length; // points per ring
+
+  const positions = [];
+  const indices = [];
+  // Push vertices: ring i, point j → vertex index i*N + j (at (x, y, z) where y,z from point)
+  for(let i=0;i<stops.length;i++){
+    const x = stops[i].x;
+    for(let j=0;j<N;j++){
+      const p = ringPts[i][j];
+      positions.push(x, p.y, p.x);  // p.x=Z-coord in cross-section, p.y=Y height
+    }
+  }
+  // Side faces: between ring i and ring i+1
+  for(let i=0;i<stops.length-1;i++){
+    for(let j=0;j<N;j++){
+      const j2 = (j+1) % N;
+      const a = i*N + j,     b = i*N + j2;
+      const c = (i+1)*N + j, d = (i+1)*N + j2;
+      // Two triangles. Outward normal should point away from interior.
+      indices.push(a, c, d);
+      indices.push(a, d, b);
+    }
+  }
+  // End caps: triangle-fan around each end ring's centroid
+  function addCap(ringIdx, reverse){
+    const x = stops[ringIdx].x;
+    // Compute centroid (y,z)
+    let cy=0, cz=0;
+    for(let j=0;j<N;j++){ cy += ringPts[ringIdx][j].y; cz += ringPts[ringIdx][j].x; }
+    cy/=N; cz/=N;
+    const centerIdx = positions.length / 3;
+    positions.push(x, cy, cz);
+    for(let j=0;j<N;j++){
+      const j2 = (j+1) % N;
+      const a = ringIdx*N + j, b = ringIdx*N + j2;
+      if(reverse) indices.push(centerIdx, b, a);
+      else        indices.push(centerIdx, a, b);
+    }
+  }
+  addCap(0, false);                   // -X end
+  addCap(stops.length-1, true);       // +X end
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+const batMat = new THREE.MeshStandardMaterial({ color: 0x1f7ad6, roughness: 0.42, metalness: 0.04 });
+const battery = new THREE.Mesh(buildBatteryGeometry(), batMat);
+battery.castShadow = true; battery.receiveShadow = true;
+scene.add(battery);
+
+// Subtle horizontal seam/groove on the long sides — the alignment line
+function addBatterySeam(zSign){
+  const len = BAT.length * 0.78;
+  const seamGeom = new THREE.BoxGeometry(len, 0.010, 0.003);
+  const seamMat = new THREE.MeshStandardMaterial({ color: 0x1c4d85, roughness: 0.9 });
+  const seam = new THREE.Mesh(seamGeom, seamMat);
+  // Match the seam Y to the drape's lower edge: chamfer_bottom_y - flap_outer_w.
+  seam.position.set(0, (BAT.height - BAT.shoulder_top) - 0.20, zSign * (BAT.body_w/2 + 0.001));
+  battery.add(seam);
+}
+addBatterySeam(+1);
+addBatterySeam(-1);
+
+// Raised lugs on the battery's top plateau — these are the "pointy things" the sensor housing's
+// feet point toward. Two lugs at the +X end of the battery, just past where the patch covers.
+// Two protruding cuboid feet on the END FACE of the battery (past the tapered tip).
+// They stick out in +X, sitting near the lower portion of the end \u2014 matching the
+// "kickstand foot" silhouette in the end-on photo.
+function addBatteryLugs(){
+  // Sloped kickstand feet that blend into the battery: same material, generous bevel on the
+  // outer corners, and a slight top chamfer so the foot reads as an integral cast feature
+  // rather than a stuck-on prism.
+  const lugX_len = 0.36;             // protrusion past end face along X
+  const lugY_h   = BAT.height - BAT.shoulder_top - 0.06;  // stop below the +X top edge
+  const lugZ_d   = 0.16;             // foot depth along Z
+  const topChamfer = 0.10;           // small chamfer at the top so it tucks under the curve
+
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);                          // inner-bottom (at end face, floor)
+  shape.lineTo(lugX_len, 0);                   // outer-bottom
+  shape.lineTo(topChamfer * 0.4, lugY_h - topChamfer); // chamfer kink near the top
+  shape.lineTo(0, lugY_h);                     // inner-top
+  shape.lineTo(0, 0);
+  const wedgeGeom = new THREE.ExtrudeGeometry(shape, {
+    depth: lugZ_d,
+    bevelEnabled: true,
+    bevelSegments: 6,
+    bevelSize: 0.022,
+    bevelThickness: 0.022,
+    curveSegments: 1
+  });
+  wedgeGeom.translate(0, 0, -lugZ_d/2);
+
+  const lugX0 = BAT.length/2 - 0.06;   // tuck slightly inside the end so it blends seamlessly
+  const cZ = 0.22;
+
+  for(const z of [-cZ, +cZ]){
+    // Reuse the battery material so the lugs read as the same molded piece.
+    const lug = new THREE.Mesh(wedgeGeom, batMat);
+    lug.position.set(lugX0, 0, z);
+    lug.castShadow = true; lug.receiveShadow = true;
+    battery.add(lug);
+  }
+}
+addBatteryLugs();
+
+// ============================================================
+//  VIGIL — denim fabric patch with two-segment hinged flaps
+//
+//  When draped onto the battery, each flap kinks over the chamfered
+//  shoulder: an inner segment hugs the chamfer (angled), an outer
+//  segment continues down the vertical body wall.
+//
+//      flat (off battery):              applied (on battery):
+//
+//      ┌──────┬─────────┬──────┐                ┌──────────┐
+//      │ outF │ in │ in │ outB │                │  center  │
+//      │      │    │    │      │               /|          |\
+//      └──────┴─────────┴──────┘              / |          | \  ← inner segments
+//          ↑     center    ↑                 |  └──────────┘  |  ← outer segments
+//      front flap       back flap           outF              outB
+// ============================================================
+
+// Patch geometry — sized to match the battery surface exactly so it sits flush.
+// flap_inner_w must equal the chamfer length so the inner segment lies ON the chamfer
+// (any longer and it pokes into the battery).
+const _CHAMFER_RUN  = (BAT.body_w - BAT.top_w)/2;      // 0.14
+const _CHAMFER_LEN  = Math.sqrt(_CHAMFER_RUN*_CHAMFER_RUN + BAT.shoulder_top*BAT.shoulder_top); // ~0.278
+
+const PATCH = {
+  length: BAT.length * 0.76,         // covers most of the battery's top length
+  center_w: BAT.top_w * 1.00,        // matches the top plateau exactly
+  flap_inner_w: _CHAMFER_LEN,        // exactly covers the chamfered shoulder
+  flap_outer_w: 0.20,                // drapes down only to the side seam line
+  thickness: 0.008,
+};
+
+// Angle of the battery chamfer measured from horizontal (downward).
+const CHAMFER_ANGLE = Math.atan2(BAT.shoulder_top, (BAT.body_w - BAT.top_w)/2);
+
+// Denim texture (procedural)
+function makeDenimTexture(){
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#6e8198'; ctx.fillRect(0,0,256,256);
+  ctx.lineWidth = 1;
+  for(let i=-300;i<300;i+=3){
+    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i+300,300); ctx.stroke();
+  }
+  for(let i=-300;i<300;i+=4){
+    ctx.strokeStyle = 'rgba(25,40,65,0.22)';
+    ctx.beginPath(); ctx.moveTo(i+1,0); ctx.lineTo(i+301,300); ctx.stroke();
+  }
+  for(let i=0;i<800;i++){
+    ctx.fillStyle = `rgba(255,255,255,${Math.random()*0.08})`;
+    ctx.fillRect(Math.random()*256, Math.random()*256, 1, 1);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(4, 4);
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+const denimTex = makeDenimTexture();
+const denimMat = new THREE.MeshStandardMaterial({
+  map: denimTex, color: 0x88a4c2, roughness: 0.92, metalness: 0.0, side: THREE.DoubleSide
+});
+
+const paperMat = new THREE.MeshStandardMaterial({
+  color: 0xece4cf, roughness: 0.92, metalness: 0.0, side: THREE.DoubleSide
+});
+const sensorMat = new THREE.MeshStandardMaterial({
+  color: 0xfbfaf5, roughness: 0.45, metalness: 0.05, emissive: 0x000000
+});
+
+// Helper to build a rounded-rect Shape
+function roundedRectShape(w, h, r){
+  const s = new THREE.Shape();
+  s.moveTo(-w/2 + r, -h/2);
+  s.lineTo( w/2 - r, -h/2);
+  s.quadraticCurveTo( w/2, -h/2,  w/2, -h/2 + r);
+  s.lineTo( w/2, h/2 - r);
+  s.quadraticCurveTo( w/2, h/2,  w/2 - r, h/2);
+  s.lineTo(-w/2 + r, h/2);
+  s.quadraticCurveTo(-w/2, h/2, -w/2, h/2 - r);
+  s.lineTo(-w/2, -h/2 + r);
+  s.quadraticCurveTo(-w/2, -h/2, -w/2 + r, -h/2);
+  return s;
+}
+
+// Build the patch (vigil)
+const vigil = new THREE.Group();
+scene.add(vigil);
+
+// Center panel — geometry shifted up by thickness/2 so panel UNDERSIDE sits at mesh y=0,
+// not the center. This makes hinges line up cleanly with battery surfaces (no half-thickness clip).
+const centerGeom = new THREE.BoxGeometry(PATCH.length, PATCH.thickness, PATCH.center_w);
+centerGeom.translate(0, PATCH.thickness/2, 0);
+const centerPanel = new THREE.Mesh(centerGeom, denimMat);
+centerPanel.castShadow = true; centerPanel.receiveShadow = true;
+vigil.add(centerPanel);
+
+// Sensor housing on top of center panel.
+//   * Body is oriented the same way as the battery: longer along X, narrower across Z.
+//   * Two short "feet" protrude past one short end (+X), with a U-shaped notch between them
+//     that fits around the matching raised lug on the battery's top plateau.
+//
+//      ┌────────────────────────────┐   body
+//      │                            │
+//      │                            ├──┐ ← foot
+//      │                            │  │
+//      │           BODY             │  │ ← notch (gap)
+//      │                            │  │
+//      │                            ├──┘ ← foot
+//      │                            │
+//      └────────────────────────────┘
+//                                       (+X →)
+function buildSensorShape(){
+  const bodyW = 0.62;     // along X (long axis), shorter than patch length
+  const bodyD = 0.36;     // along Z (across)
+  const r     = 0.04;
+  const footL = 0.10;     // how far feet stick past body in +X
+  const footW = 0.08;     // each foot width along Z
+  const notchZ = 0.10;    // gap between feet along Z (notch width)
+
+  // Foot centers (along Z)
+  const cZ = notchZ/2 + footW/2;
+
+  const s = new THREE.Shape();
+  // Walk CCW. Start at bottom-left, go around.
+  s.moveTo(-bodyW/2 + r, -bodyD/2);
+  s.lineTo( bodyW/2 - r, -bodyD/2);
+  s.quadraticCurveTo( bodyW/2, -bodyD/2, bodyW/2, -bodyD/2 + r);
+  // Up the +X edge to the lower foot
+  s.lineTo( bodyW/2, -cZ - footW/2);
+  s.lineTo( bodyW/2 + footL, -cZ - footW/2);
+  s.lineTo( bodyW/2 + footL, -cZ + footW/2);
+  s.lineTo( bodyW/2,         -cZ + footW/2);
+  // Notch dip — go back to body edge, across the notch, out to upper foot
+  s.lineTo( bodyW/2,          cZ - footW/2);
+  s.lineTo( bodyW/2 + footL,  cZ - footW/2);
+  s.lineTo( bodyW/2 + footL,  cZ + footW/2);
+  s.lineTo( bodyW/2,          cZ + footW/2);
+  // Continue up the +X edge to top-right corner
+  s.lineTo( bodyW/2, bodyD/2 - r);
+  s.quadraticCurveTo( bodyW/2, bodyD/2, bodyW/2 - r, bodyD/2);
+  s.lineTo(-bodyW/2 + r, bodyD/2);
+  s.quadraticCurveTo(-bodyW/2, bodyD/2, -bodyW/2, bodyD/2 - r);
+  s.lineTo(-bodyW/2, -bodyD/2 + r);
+  s.quadraticCurveTo(-bodyW/2, -bodyD/2, -bodyW/2 + r, -bodyD/2);
+  return s;
+}
+const sensorGeom = new THREE.ExtrudeGeometry(buildSensorShape(), {
+  depth: 0.014, bevelEnabled:true, bevelSegments:2, bevelSize:0.004, bevelThickness:0.004, curveSegments:8
+});
+sensorGeom.rotateX(-Math.PI/2);
+const sensor = new THREE.Mesh(sensorGeom, sensorMat);
+sensor.position.set(0.45, PATCH.thickness + 0.0005, 0);  // sits on TOP of center panel
+sensor.castShadow = true; sensor.receiveShadow = true;
+// User-test build: the physical sensor housing is not part of the design,
+// so it is hidden from the animation entirely. The patch + adhesive flaps
+// are what the participant is being taught to apply.
+sensor.visible = false;
+vigil.add(sensor);
+
+// Activation pip
+const pip = new THREE.Mesh(
+  new THREE.CircleGeometry(0.020, 24),
+  new THREE.MeshStandardMaterial({ color:0x1a1a1a, roughness:0.4 })
+);
+pip.rotation.x = -Math.PI/2;
+pip.position.set(0.20, PATCH.thickness + 0.016, 0);
+// Hidden along with the sensor housing.
+pip.visible = false;
+vigil.add(pip);
+const pipMat = pip.material;
+
+// Build one side of the flap system. sign = +1 for front (extends +Z), -1 for back.
+//
+// User-test build — soft-adhesive feel:
+//   The inner and outer panels are now subdivided Plane meshes whose
+//   vertices are warped along Z when the flap is draped, so the plaster
+//   appears to BEND smoothly over the battery shoulder rather than hinge
+//   like a folded sheet of paper. The hinge groups still set the dominant
+//   angle; the per-vertex curl is layered on top of that.
+function buildFlapSide(sign){
+  // Outer hinge: rotates around X to drape inner segment off the top edge
+  const root = new THREE.Group();
+  root.position.set(0, 0, sign * PATCH.center_w/2);
+  vigil.add(root);
+
+  // Inner panel — underside at hinge-frame y=0
+  // Subdivided along Z (the bend axis) so we can curl it during the drape.
+  const SUBDIV = 12;
+  const innerGeom = new THREE.PlaneGeometry(PATCH.length, PATCH.flap_inner_w, 1, SUBDIV);
+  innerGeom.rotateX(-Math.PI/2);                     // lie flat in XZ
+  innerGeom.translate(0, PATCH.thickness/2, sign * PATCH.flap_inner_w/2);
+  const innerPanel = new THREE.Mesh(innerGeom, denimMat);
+  innerPanel.castShadow = true; innerPanel.receiveShadow = true;
+  // Cache the rest-pose Z of each vertex so we can re-warp from rest each
+  // frame rather than accumulating distortion.
+  innerPanel.userData.restZ = (() => {
+    const pos = innerGeom.attributes.position;
+    const arr = new Float32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) arr[i] = pos.getZ(i);
+    return arr;
+  })();
+  innerPanel.userData.sign = sign;
+  innerPanel.userData.kind = 'inner';
+  root.add(innerPanel);
+
+  // Outer hinge group at the end of inner panel
+  const outerHinge = new THREE.Group();
+  outerHinge.position.set(0, 0, sign * PATCH.flap_inner_w);
+  root.add(outerHinge);
+
+  // Outer panel — underside at outer-hinge frame y=0. Same subdivision +
+  // curl treatment so the bottom edge of the drape softens rather than
+  // jutting out as a hard rectangle.
+  const outerGeom = new THREE.PlaneGeometry(PATCH.length, PATCH.flap_outer_w, 1, SUBDIV);
+  outerGeom.rotateX(-Math.PI/2);
+  outerGeom.translate(0, PATCH.thickness/2, sign * PATCH.flap_outer_w/2);
+  const outerPanel = new THREE.Mesh(outerGeom, denimMat);
+  outerPanel.castShadow = true; outerPanel.receiveShadow = true;
+  outerPanel.userData.restZ = (() => {
+    const pos = outerGeom.attributes.position;
+    const arr = new Float32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) arr[i] = pos.getZ(i);
+    return arr;
+  })();
+  outerPanel.userData.sign = sign;
+  outerPanel.userData.kind = 'outer';
+  outerHinge.add(outerPanel);
+
+  // Paper strip on the underside of the OUTER panel
+  const stripGeom = new THREE.PlaneGeometry(PATCH.length * 0.90, PATCH.flap_outer_w * 0.85);
+  const strip = new THREE.Mesh(stripGeom, paperMat);
+  strip.rotation.x = Math.PI/2;
+  strip.position.set(0, -0.001, sign * PATCH.flap_outer_w/2);
+  outerHinge.add(strip);
+
+  // Pull-tab sticking past the outer edge
+  // User-test build: the real product has no white pull-tab hanging off
+  // the strip, so the tab is hidden everywhere it would have appeared.
+  const tabGeom = new THREE.PlaneGeometry(PATCH.length * 0.18, 0.14);
+  const tab = new THREE.Mesh(tabGeom, paperMat);
+  tab.rotation.x = Math.PI/2;
+  tab.position.set(0, -0.001, sign * (PATCH.flap_outer_w + 0.07));
+  tab.visible = false;
+  outerHinge.add(tab);
+
+  return { root, outerHinge, innerPanel, outerPanel, strip, tab };
+}
+
+const flapF = buildFlapSide(+1);
+const flapB = buildFlapSide(-1);
+
+// Convenience aliases that the rest of the code uses
+const flapFront = flapF.root;       // outer rotation = chamfer angle
+const flapBack  = flapB.root;
+const outerFront = flapF.outerHinge; // additional rotation to take outer panel to vertical
+const outerBack  = flapB.outerHinge;
+
+// Alignment guides
+const guideMat = new THREE.LineBasicMaterial({ color:0x111111, transparent:true, opacity:0 });
+function makeRectOutline(w, d, y){
+  const s = roundedRectShape(w, d, 0.04);
+  const pts = s.getPoints(64).map(p => new THREE.Vector3(p.x, y, p.y));
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  return new THREE.Line(g, guideMat.clone());
+}
+const guideTop   = makeRectOutline(BAT.length * 1.0, BAT.top_w * 1.0, BAT.height + 0.004);
+const guidePatch = makeRectOutline(PATCH.length * 1.0, PATCH.center_w * 1.0, BAT.height + 0.006);
+// Parent alignment guides to the battery so they always rotate with it.
+battery.add(guideTop); battery.add(guidePatch);
+
+// ----------------------------------------------------------------
+//  Alignment indicators (pulse during step 5 to call attention to
+//  the corners + seam ends + lug positions that the patch lines up to).
+// ----------------------------------------------------------------
+const alignmentMaterials = [];
+function makeMarker(x, y, z, kind, opts = {}){
+  let mesh;
+  const color = 0xffb454;   // warm highlight, reads against the blue battery
+  if(kind === 'ring'){
+    const r = opts.r ?? 0.07;
+    const tube = opts.tube ?? 0.012;
+    const geom = new THREE.RingGeometry(r - tube, r + tube, 32);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0, side:THREE.DoubleSide });
+    mesh = new THREE.Mesh(geom, mat);
+    mesh.rotation.x = -Math.PI/2;
+    alignmentMaterials.push(mat);
+  } else if(kind === 'segment'){
+    // Short line segment along X (for seam-end highlights)
+    const len = opts.len ?? 0.18;
+    const thickness = 0.014;
+    const geom = new THREE.PlaneGeometry(len, thickness);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0, side:THREE.DoubleSide });
+    mesh = new THREE.Mesh(geom, mat);
+    // Plane defaults to XY. We want it on the battery's side wall (XY plane facing +Z or -Z).
+    if(opts.faceZ){ /* leave as XY, plane normal = +Z */ }
+    if(opts.faceMinusZ){ mesh.rotation.y = Math.PI; }
+    alignmentMaterials.push(mat);
+  } else if(kind === 'dot'){
+    const r = opts.r ?? 0.045;
+    const geom = new THREE.CircleGeometry(r, 28);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0, side:THREE.DoubleSide });
+    mesh = new THREE.Mesh(geom, mat);
+    // Default orientation (faces +Z); rotate per opts.
+    if(opts.up){ mesh.rotation.x = -Math.PI/2; }
+    if(opts.faceMinusZ){ mesh.rotation.y = Math.PI; }
+    alignmentMaterials.push(mat);
+  }
+  mesh.position.set(x, y, z);
+  battery.add(mesh);
+  return mesh;
+}
+
+// Four ring markers at the top-plateau corners
+const halfL = BAT.length/2 - 0.08;        // pulled in a touch from the very corner
+const halfW = BAT.top_w/2;
+const topY  = BAT.height + 0.005;
+makeMarker(+halfL, topY, +halfW, 'ring', { up:true });
+makeMarker(-halfL, topY, +halfW, 'ring', { up:true });
+makeMarker(+halfL, topY, -halfW, 'ring', { up:true });
+makeMarker(-halfL, topY, -halfW, 'ring', { up:true });
+// Force ring rotation flat (the `up` option in the helper sets rotation.x for dots; rings already rotate themselves)
+// Above we set rotation.x for rings inside the helper for 'ring' kind.
+
+// Full-side highlight rectangles — cover the drape area on each long side from chamfer
+// bottom down to the seam line, so the user sees "the whole strip lands here".
+const sideHiW = BAT.length * 0.82;                                  // length along X
+const sideHiH = BAT.shoulder_top + 0.20 - 0.02;                     // chamfer + drape area
+const sideHiY = (BAT.height - BAT.shoulder_top - 0.20)/2 + (BAT.height + BAT.shoulder_top)/2;
+// Simpler: pick center between chamfer bottom (0.71) and seam Y (0.51)
+const sideCenterY = ((BAT.height - BAT.shoulder_top) + ((BAT.height - BAT.shoulder_top) - 0.20))/2;
+const sideHeight  = 0.20 + BAT.shoulder_top * 0.4;                  // include some chamfer
+const sideZOff = BAT.body_w/2 + 0.003;
+function makeSideHighlight(zSign){
+  const geom = new THREE.PlaneGeometry(sideHiW, sideHeight);
+  const mat = new THREE.MeshBasicMaterial({ color:0xffb454, transparent:true, opacity:0, side:THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.position.set(0, sideCenterY, zSign * sideZOff);
+  if(zSign < 0) mesh.rotation.y = Math.PI;
+  battery.add(mesh);
+  alignmentMaterials.push(mat);
+}
+makeSideHighlight(+1);
+makeSideHighlight(-1);
+
+// Dots on top of each lug position (sensor-foot alignment cue)
+const lugMarkerX = BAT.length/2 - BAT.end_cap * 0.55;  // matches sensor-foot tip direction
+makeMarker(lugMarkerX, topY, +0.09, 'dot', { up:true, r:0.05 });
+makeMarker(lugMarkerX, topY, -0.09, 'dot', { up:true, r:0.05 });
+
+// Activation glow
+const glow = new THREE.Mesh(
+  new THREE.CircleGeometry(0.45, 48),
+  new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0 })
+);
+glow.rotation.x = -Math.PI/2;
+scene.add(glow);
+const glowMat = glow.material;
+
+// ============================================================
+//  Tween system (promise-based, pause-aware)
+// ============================================================
+const easeInOutCubic = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
+const easeOutCubic = t => 1 - Math.pow(1-t, 3);
+
+const tweens = [];
+function tween({duration=1000, ease=easeInOutCubic, onUpdate, onComplete}={}){
+  return new Promise(resolve => {
+    const t = { start: performance.now(), duration, ease, onUpdate, onComplete, resolve, cancelled:false };
+    tweens.push(t);
+    t._resolve = () => { if(!t.cancelled){ onComplete && onComplete(); resolve(); } };
+  });
+}
+function clearTweens(){ tweens.forEach(t => { t.cancelled = true; t.resolve(); }); tweens.length = 0; }
+const pendingTimeouts = [];
+function wait(ms){ return new Promise(r => { const id = setTimeout(()=>r(), ms); pendingTimeouts.push(id); }); }
+function clearPending(){ pendingTimeouts.forEach(clearTimeout); pendingTimeouts.length = 0; }
+
+const lerp = (a,b,t)=>a+(b-a)*t;
+
+function tweenCamera(toPos, toLook, duration=1300){
+  const fromPos = logicalCamPos.clone();
+  const fromLook = camTarget.clone();
+  return tween({
+    duration, ease: easeInOutCubic,
+    onUpdate: (t) => {
+      logicalCamPos.set(lerp(fromPos.x,toPos.x,t), lerp(fromPos.y,toPos.y,t), lerp(fromPos.z,toPos.z,t));
+      camTarget.set(lerp(fromLook.x,toLook.x,t), lerp(fromLook.y,toLook.y,t), lerp(fromLook.z,toLook.z,t));
+      applyPortraitFraming();
+    }
+  });
+}
+function tweenObj(obj, props, duration=1000, ease=easeInOutCubic){
+  const from = {};
+  for(const k in props){
+    const path = k.split('.'); let cur = obj;
+    for(let i=0;i<path.length-1;i++) cur = cur[path[i]];
+    from[k] = cur[path[path.length-1]];
+  }
+  return tween({
+    duration, ease,
+    onUpdate: (t) => {
+      for(const k in props){
+        const path = k.split('.'); let cur = obj;
+        for(let i=0;i<path.length-1;i++) cur = cur[path[i]];
+        cur[path[path.length-1]] = lerp(from[k], props[k], t);
+      }
+    }
+  });
+}
+
+// ============================================================
+//  Scene state — poses & viewpoints
+// ============================================================
+const APPLIED_Y = BAT.height + 0.001;   // underside of center panel sits just above battery top
+
+// Drape rotations: inner segment hugs chamfer, outer continues down to vertical.
+const DRAPE_INNER_F = +CHAMFER_ANGLE;
+const DRAPE_OUTER_F = +(Math.PI/2 - CHAMFER_ANGLE);
+const DRAPE_INNER_B = -CHAMFER_ANGLE;
+const DRAPE_OUTER_B = -(Math.PI/2 - CHAMFER_ANGLE);
+const LIFT_BACK_INNER = THREE.MathUtils.degToRad(-18); // back flap slightly lifted (still un-peeled)
+
+// Hero viewpoints — pulled back so the entire battery + airborne patch stay in frame
+const VIEW_HERO       = { pos:new THREE.Vector3( 5.6, 3.6, 6.8), look:new THREE.Vector3(0, BAT.height*0.55, 0) };
+const VIEW_HERO_CLOSE = { pos:new THREE.Vector3( 5.0, 3.2, 6.0), look:new THREE.Vector3(0, BAT.height*0.65, 0) };
+// FLIP view: above and to the side, looking down at the now-upward underside of the patch
+const VIEW_FLIP       = { pos:new THREE.Vector3( 4.0, 5.2, 4.8), look:new THREE.Vector3(0, BAT.height + 1.4, 0) };
+// Back view — swings the camera around to the -Z side of the battery so you see the BACK flap
+// when its strip is being peeled.
+const VIEW_BACK       = { pos:new THREE.Vector3( 3.6, 3.0, -6.4), look:new THREE.Vector3(0, BAT.height*0.7, 0) };
+
+function setFlapsFlat(){
+  flapFront.rotation.x = 0; outerFront.rotation.x = 0;
+  flapBack.rotation.x = 0;  outerBack.rotation.x = 0;
+}
+function setFlapsDrapedFront(){
+  flapFront.rotation.x = DRAPE_INNER_F; outerFront.rotation.x = DRAPE_OUTER_F;
+}
+function setFlapsDrapedBack(){
+  flapBack.rotation.x = DRAPE_INNER_B; outerBack.rotation.x = DRAPE_OUTER_B;
+}
+
+function resetScene(){
+  battery.position.set(0,0,0); battery.rotation.set(0,0,0);
+
+  vigil.visible = false;
+  vigil.position.set(0, BAT.height + 2.3, 0);
+  vigil.rotation.set(0, 0, 0);
+  vigil.scale.set(1,1,1);
+
+  setFlapsFlat();
+  flapF.strip.visible = true; flapF.tab.visible = true;
+  flapB.strip.visible = true; flapB.tab.visible = true;
+
+  guideTop.material.opacity = 0;
+  guidePatch.material.opacity = 0;
+
+  glowMat.opacity = 0;
+  pipMat.emissive.setHex(0x000000);
+  pipMat.emissiveIntensity = 0;
+
+  logicalCamPos.copy(VIEW_HERO.pos);
+  camTarget.copy(VIEW_HERO.look);
+  applyPortraitFraming();
+
+  document.getElementById('donecard').classList.remove('on');
+}
+resetScene();
+
+// ============================================================
+//  Step animations
+// ============================================================
+async function step1(){
+  vigil.visible = false;
+  battery.rotation.y = 0;
+  await tweenCamera(VIEW_HERO.pos, VIEW_HERO.look, 900);
+  // Slow ~15° sweep that returns to 0 so subsequent steps line up with the original axes.
+  await tween({ duration: 3600, ease: t => t,
+    onUpdate: t => battery.rotation.y = THREE.MathUtils.degToRad(7.5 * Math.sin(t * Math.PI * 2))
+  });
+  battery.rotation.y = 0;
+}
+
+async function step2(){
+  // Patch lands on the battery, then both flaps drape so the rest state matches
+  // the battery's outline (no "wings out" look between steps).
+  battery.rotation.y = 0;   // ensure battery is axis-aligned for the rest of the sequence
+  vigil.visible = true;
+  vigil.position.set(0, BAT.height + 2.0, 0);
+  vigil.rotation.set(0, 0, 0);
+  setFlapsFlat();
+
+  await tweenCamera(VIEW_HERO_CLOSE.pos, VIEW_HERO_CLOSE.look, 800);
+  await tweenObj(vigil, { 'position.y': APPLIED_Y }, 1400, easeOutCubic);
+
+  // Drape both flaps onto the battery (inner segment + outer segment in parallel)
+  await Promise.all([
+    tween({ duration: 900, ease: easeOutCubic,
+      onUpdate: t => { flapFront.rotation.x = DRAPE_INNER_F * t; flapBack.rotation.x = DRAPE_INNER_B * t; } }),
+    tween({ duration: 900, ease: easeOutCubic,
+      onUpdate: t => { outerFront.rotation.x = DRAPE_OUTER_F * t; outerBack.rotation.x = DRAPE_OUTER_B * t; } }),
+  ]);
+}
+
+async function step3(){
+  // Un-drape so the flaps lie flat again, then lift off and flip 180° to reveal underside.
+  await Promise.all([
+    tween({ duration: 700, ease: easeInOutCubic,
+      onUpdate: t => { flapFront.rotation.x = DRAPE_INNER_F * (1-t); flapBack.rotation.x = DRAPE_INNER_B * (1-t); } }),
+    tween({ duration: 700, ease: easeInOutCubic,
+      onUpdate: t => { outerFront.rotation.x = DRAPE_OUTER_F * (1-t); outerBack.rotation.x = DRAPE_OUTER_B * (1-t); } }),
+  ]);
+  setFlapsFlat();
+
+  await tweenObj(vigil, { 'position.y': BAT.height + 1.6 }, 700);
+  await Promise.all([
+    tweenCamera(VIEW_FLIP.pos, VIEW_FLIP.look, 1400),
+    tween({ duration: 1400, ease: easeInOutCubic,
+      onUpdate: t => vigil.rotation.x = Math.PI * t
+    })
+  ]);
+}
+
+// Peel a strip around its INNER edge — the tab end (outer edge) lifts up
+// and away from the panel face. The pivot sits at the still-attached
+// inner edge; the OUTER (tab) end swings upward off the adhesive.
+//
+// The sweep is intentionally LESS than 90° so the strip doesn't curl
+// back over itself and clip through the patch / battery body. We also
+// translate the pivot away from the panel face during the rotation so
+// the strip clearly lifts off, then disappears.
+async function peelStripAt(side, duration=1500){
+  const outerHinge = side.outerHinge;
+  const sign = (side === flapF) ? +1 : -1;
+  const peelPivot = new THREE.Group();
+  outerHinge.add(peelPivot);
+  // Pivot at INNER edge (z=0 in outerHinge frame), at the underside Y.
+  peelPivot.position.set(0, -0.001, 0);
+
+  // Reparent strip + tab, keeping their actual world positions identical.
+  const stripZ = sign * PATCH.flap_outer_w/2;
+  const tabZ   = sign * (PATCH.flap_outer_w + 0.07);
+  outerHinge.remove(side.strip); peelPivot.add(side.strip);
+  side.strip.position.set(0, 0, stripZ);
+  outerHinge.remove(side.tab); peelPivot.add(side.tab);
+  side.tab.position.set(0, 0, tabZ);
+
+  // Peel direction:
+  //   * Patch is FLIPPED in this step, so the adhesive face is UP in world.
+  //   * Rotating peelPivot.rotation.x by +sign*α moves the strip's tab end
+  //     in the panel-normal-AWAY direction — i.e., upward off the
+  //     adhesive in world. For sign=+1 (front), that's a positive rotation;
+  //     for sign=-1 it would naturally invert (not used here).
+  //   * 80° sweep lifts the strip cleanly off without curling it back
+  //     across the patch face.
+  const sweep = sign * THREE.MathUtils.degToRad(80);
+  await tween({ duration, ease: easeOutCubic,
+    onUpdate: t => {
+      peelPivot.rotation.x = sweep * t;
+      // Lift the pivot itself slightly away from the panel face so the
+      // whole strip drifts off rather than rotating in place. flap-local
+      // -Y is the away-from-panel direction; in world (flipped patch)
+      // that's +Y, i.e. upward away from the upturned adhesive.
+      peelPivot.position.y = -0.001 - 0.18 * t;
+      peelPivot.rotation.z = sign * THREE.MathUtils.degToRad(3) * Math.sin(t * Math.PI);
+    }
+  });
+  await wait(180);
+  side.strip.visible = false; side.tab.visible = false;
+  peelPivot.remove(side.strip); peelPivot.remove(side.tab);
+  outerHinge.add(side.strip); outerHinge.add(side.tab);
+  side.strip.position.set(0, -0.001, sign * PATCH.flap_outer_w/2);
+  side.tab.position.set(0, -0.001, sign * (PATCH.flap_outer_w + 0.07));
+  outerHinge.remove(peelPivot);
+}
+
+async function step4(){
+  // Peel front strip while patch is flipped (underside-up). Camera stays overhead.
+  await tweenCamera(
+    new THREE.Vector3( 4.4, 5.0, 4.0),
+    new THREE.Vector3(0, BAT.height + 1.4, 0),
+    800
+  );
+  await peelStripAt(flapF, 1500);
+}
+
+async function step5(){
+  // "Align over the battery" — user-test build.
+  //
+  // After step 4 the patch was floating, flipped underside-up, with the
+  // front strip peeled off. Here we flip it back upright and lower it onto
+  // the battery WITHOUT draping either flap, so step 6 ("stick the first
+  // side") shows the front going down as a discrete action.
+  await tweenCamera(VIEW_HERO_CLOSE.pos, VIEW_HERO_CLOSE.look, 900);
+  await tweenObj(vigil, { 'position.y': BAT.height + 1.1 }, 600);
+  await tween({ duration: 1100, ease: easeInOutCubic,
+    onUpdate: t => vigil.rotation.x = Math.PI * (1 - t)
+  });
+  vigil.rotation.x = 0;
+  setFlapsFlat();
+
+  // Pulse alignment guides while the patch settles into place.
+  const pulse = (mat, peak=0.9) => tween({
+    duration: 1600,
+    onUpdate: t => mat.opacity = Math.max(0, (peak * 0.5 + peak * 0.5 * Math.sin(t * Math.PI * 3)) * (1 - t*0.25))
+  });
+  await Promise.all([
+    pulse(guideTop.material, 1.0),
+    pulse(guidePatch.material, 1.0),
+    ...alignmentMaterials.map(m => pulse(m, 1.0)),
+    tweenObj(vigil, { 'position.y': APPLIED_Y }, 1600, easeInOutCubic),
+  ]);
+  guideTop.material.opacity = 0;
+  guidePatch.material.opacity = 0;
+  alignmentMaterials.forEach(m => m.opacity = 0);
+}
+
+async function step6(){
+  // "Stick the first side" — drape ONLY the front flap onto the battery.
+  // The back flap stays flat/horizontal so the participant can see clearly
+  // that just one side has been stuck so far.
+  await tweenCamera(VIEW_HERO_CLOSE.pos, VIEW_HERO_CLOSE.look, 600);
+
+  await Promise.all([
+    tween({ duration: 900, ease: easeOutCubic,
+      onUpdate: t => { flapFront.rotation.x = DRAPE_INNER_F * t; } }),
+    tween({ duration: 900, ease: easeOutCubic,
+      onUpdate: t => { outerFront.rotation.x = DRAPE_OUTER_F * t; } }),
+  ]);
+
+  // Contact flash on the front side to underline the "stuck" moment.
+  glow.position.set(0, BAT.height*0.5, BAT.body_w/2 + 0.18);
+  await tween({ duration: 500,
+    onUpdate: t => glowMat.opacity = Math.sin(t*Math.PI) * 0.28
+  });
+  glowMat.opacity = 0;
+}
+
+async function step7(){
+  // "Peel the second strip" \u2014 first side stays stuck (carried over from
+  // step 6). Rotate the camera all the way around to the OPPOSITE face so
+  // the still clearly shows the second peel strip being lifted off.
+  await tweenCamera(VIEW_BACK.pos, VIEW_BACK.look, 1200);
+
+  // Lift the back flap slightly so the strip is accessible and visible.
+  const fromInner = flapBack.rotation.x;
+  const fromOuter = outerBack.rotation.x;
+  await Promise.all([
+    tween({ duration: 700, ease: easeOutCubic,
+      onUpdate: t => flapBack.rotation.x = fromInner + (LIFT_BACK_INNER - fromInner) * t }),
+    tween({ duration: 700, ease: easeOutCubic,
+      onUpdate: t => outerBack.rotation.x = fromOuter + (0 - fromOuter) * t }),
+  ]);
+  flapBack.rotation.x = LIFT_BACK_INNER;
+  outerBack.rotation.x = 0;
+
+  await peelStripAtUpright(flapB, 1500);
+}
+
+// Peel a strip when the patch is right-side-up (not flipped). Same pivot
+// strategy as the flipped version, but the rotation sign needs to flip
+// with the strip's `sign` because the panel face direction in world is
+// different. The pivot also translates away from the panel face so the
+// strip clearly drops off the underside of the lifted flap.
+async function peelStripAtUpright(side, duration=1500){
+  const outerHinge = side.outerHinge;
+  const sign = (side === flapF) ? +1 : -1;
+  const peelPivot = new THREE.Group();
+  outerHinge.add(peelPivot);
+  peelPivot.position.set(0, -0.001, 0);
+  outerHinge.remove(side.strip); peelPivot.add(side.strip);
+  side.strip.position.set(0, 0, sign * PATCH.flap_outer_w/2);
+  outerHinge.remove(side.tab); peelPivot.add(side.tab);
+  side.tab.position.set(0, 0, sign * (PATCH.flap_outer_w + 0.07));
+
+  // Patch is upright. The strip lies on the UNDERSIDE of the lifted back
+  // flap, so peeling away means swinging the tab end DOWN (away from the
+  // underside) and translating the pivot in flap-local -Y, which in world
+  // is roughly down-and-forward off the back of the battery. Using
+  // sign * 80° gives the correct rotation direction for back (sign=-1):
+  // the tab swings downward off the back flap, falling away from the
+  // adhesive cleanly without sweeping through battery geometry.
+  const sweep = sign * THREE.MathUtils.degToRad(80);
+  await tween({ duration, ease: easeOutCubic,
+    onUpdate: t => {
+      peelPivot.rotation.x = sweep * t;
+      peelPivot.position.y = -0.001 - 0.22 * t;
+      peelPivot.rotation.z = -sign * THREE.MathUtils.degToRad(3) * Math.sin(t * Math.PI);
+    }
+  });
+  await wait(180);
+  side.strip.visible = false; side.tab.visible = false;
+  peelPivot.remove(side.strip); peelPivot.remove(side.tab);
+  outerHinge.add(side.strip); outerHinge.add(side.tab);
+  side.strip.position.set(0, -0.001, sign * PATCH.flap_outer_w/2);
+  side.tab.position.set(0, -0.001, sign * (PATCH.flap_outer_w + 0.07));
+  outerHinge.remove(peelPivot);
+}
+
+async function step8(){
+  // Press back flap down — keep the camera on the BACK view so we see the seal happen.
+  await tweenCamera(VIEW_BACK.pos, VIEW_BACK.look, 600);
+
+  const fromInner = flapBack.rotation.x;
+  await Promise.all([
+    tween({ duration: 1100, ease: easeOutCubic,
+      onUpdate: t => flapBack.rotation.x = fromInner + (DRAPE_INNER_B - fromInner) * t }),
+    tween({ duration: 1100, ease: easeOutCubic,
+      onUpdate: t => outerBack.rotation.x = DRAPE_OUTER_B * t }),
+  ]);
+
+  // Subtle press squash
+  await tween({ duration: 380, ease: easeOutCubic,
+    onUpdate: t => {
+      const s = 1 - 0.03 * Math.sin(t * Math.PI);
+      vigil.scale.set(1, s, 1);
+    }
+  });
+  vigil.scale.set(1,1,1);
+
+  glow.position.set(0, BAT.height*0.5, -BAT.body_w/2 - 0.18);
+  await tween({ duration: 600,
+    onUpdate: t => glowMat.opacity = Math.sin(t*Math.PI) * 0.28
+  });
+  glowMat.opacity = 0;
+}
+
+async function step9(){
+  // "Done" — user-test build: a single calm final visual. The previous
+  // implementation had two beats (an emissive pip pulse + a 7-second orbit
+  // camera move) that read as two visuals advancing one after another. Now
+  // we hold a stable hero shot of the finished patch with the done card,
+  // matching the rhythm of the other steps (single press → single visual).
+  document.getElementById('donecard').classList.add('on');
+  await tweenCamera(VIEW_HERO.pos, VIEW_HERO.look, 1200);
+}
+
+const STEP_FNS = [step1, step2, step3, step4, step5, step6, step7, step8, step9];
+
+// ============================================================
+//  Orchestration / UI
+// ============================================================
+let currentStep = 0;
+let playing = true;
+
+const stepsEl = document.getElementById('steps');
+for(let i=0;i<9;i++){
+  const pip = document.createElement('div');
+  pip.className = 'step-pip';
+  pip.innerHTML = '<div class="fill"></div>';
+  pip.addEventListener('click', () => goToStep(i));
+  stepsEl.appendChild(pip);
+}
+function updateUI(){
+  const s = STEPS[currentStep];
+  document.getElementById('title').textContent = s.title;
+  document.getElementById('instr').textContent = s.instr;
+  document.getElementById('numbox').textContent = String(currentStep+1);
+  document.getElementById('numlabel').textContent = `Step ${currentStep+1} of 9`;
+  document.getElementById('counter').textContent = `${String(currentStep+1).padStart(2,'0')} / 09`;
+  [...stepsEl.children].forEach((el, i) => {
+    el.classList.toggle('done', i < currentStep);
+    el.classList.toggle('current', i === currentStep);
+    if(i === currentStep) el.style.setProperty('--p', 0);
+  });
+  if(currentStep !== 8) document.getElementById('donecard').classList.remove('on');
+}
+
+let stepProgressStart = 0;
+let stepProgressDuration = 4000;
+// Approx animation duration for each step (only used to drive the top
+// step-pip fill). The total time a step is on-screen is
+//   animation duration + STEP_HOLD_MS hold,
+// and auto-advance fires after the hold.
+const APPROX_DUR = [3300, 1500, 3300, 2400, 3500, 1500, 3600, 1200, 1200];
+
+async function playStep(n){
+  currentStep = n;
+  updateUI();
+  if(n === 0) resetScene();
+  stepProgressStart = performance.now();
+  // Pip fill spans the full on-screen time (animation + hold) so the bar
+  // visibly fills across the whole 6-second dwell.
+  stepProgressDuration = (APPROX_DUR[n] || 3000) + STEP_HOLD_MS;
+
+  await STEP_FNS[n]();
+  const cur = stepsEl.children[n];
+  if(cur) cur.classList.add('done');
+  if(playing && n < 8){
+    await wait(STEP_HOLD_MS);
+    if(playing && currentStep === n) playStep(n + 1);
+  }
+}
+
+function rebuildToStep(n){
+  resetScene();
+  // n is the step index (0..8) we're ABOUT to play.
+  // Each block sets the cumulative state from the END of the prior step.
+  //
+  // User-test build: the per-step end states changed so that step 6 sticks
+  // only the front side (back flap stays flat), step 7 lifts the back flap
+  // and removes its strip while the camera is on the opposite face, and
+  // step 9 just holds the finished assembly.
+
+  // After step 1: no change beyond resetScene — vigil hidden.
+  // After step 2: vigil ON battery, both flaps fully draped (preview).
+  if(n >= 2){
+    vigil.visible = true;
+    vigil.position.set(0, APPLIED_Y, 0);
+    vigil.rotation.set(0,0,0);
+    setFlapsDrapedFront();
+    setFlapsDrapedBack();
+  }
+  // After step 3: vigil un-draped, lifted off, flipped 180° — hovering.
+  if(n >= 3){
+    setFlapsFlat();
+    vigil.position.set(0, BAT.height + 1.6, 0);
+    vigil.rotation.x = Math.PI;
+  }
+  // After step 4: front strip is gone.
+  if(n >= 4){
+    flapF.strip.visible = false; flapF.tab.visible = false;
+  }
+  // After step 5: upright, ON battery, flaps still FLAT (no drape yet).
+  if(n >= 5){
+    vigil.rotation.x = 0;
+    vigil.position.set(0, APPLIED_Y, 0);
+    setFlapsFlat();
+  }
+  // After step 6: FRONT draped, back stays flat. First side stuck.
+  if(n >= 6){
+    setFlapsDrapedFront();
+  }
+  // After step 7: back flap lifted, back strip gone. Camera framed on back.
+  if(n >= 7){
+    flapBack.rotation.x = LIFT_BACK_INNER;
+    outerBack.rotation.x = 0;
+    flapB.strip.visible = false; flapB.tab.visible = false;
+    logicalCamPos.copy(VIEW_BACK.pos);
+    camTarget.copy(VIEW_BACK.look);
+    applyPortraitFraming();
+  }
+  // After step 8: back flap re-draped — fully applied.
+  if(n >= 8){
+    setFlapsDrapedBack();
+  }
+}
+
+function goToStep(n){
+  clearTweens(); clearPending();
+  rebuildToStep(n);
+  playStep(n);
+}
+
+document.getElementById('next').addEventListener('click', () => goToStep(Math.min(8, currentStep + 1)));
+document.getElementById('prev').addEventListener('click', () => goToStep(Math.max(0, currentStep - 1)));
+document.getElementById('restart').addEventListener('click', () => {
+  playing = true; updatePlayIcon();
+  goToStep(0);
+});
+document.getElementById('playpause').addEventListener('click', () => {
+  playing = !playing;
+  updatePlayIcon();
+  if(playing && tweens.length === 0 && currentStep < 8){
+    playStep(currentStep + 1);
+  }
+});
+function updatePlayIcon(){
+  document.getElementById('playicon').style.display = playing ? 'none' : 'inline';
+  document.getElementById('pauseicon').style.display = playing ? 'inline' : 'none';
+}
+updatePlayIcon();
+
+// ============================================================
+//  RAF loop (pause-aware)
+// ============================================================
+let lastFrame = performance.now();
+function animate(now){
+  requestAnimationFrame(animate);
+  const dt = now - lastFrame; lastFrame = now;
+
+  if(!playing){
+    tweens.forEach(t => t.start += dt);
+    stepProgressStart += dt;
+  }
+
+  for(let i = tweens.length - 1; i >= 0; i--){
+    const t = tweens[i];
+    if(t.cancelled){ tweens.splice(i,1); continue; }
+    const raw = Math.min(1, (now - t.start) / t.duration);
+    const eased = t.ease ? t.ease(raw) : raw;
+    t.onUpdate && t.onUpdate(eased);
+    if(raw >= 1){ tweens.splice(i,1); t._resolve(); }
+  }
+
+  const elapsed = now - stepProgressStart;
+  const p = Math.min(1, elapsed / stepProgressDuration);
+  const curPip = stepsEl.children[currentStep];
+  if(curPip) curPip.style.setProperty('--p', p);
+
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(animate);
+
+updateUI();
+playStep(0);
+
+window.addEventListener('keydown', (e) => {
+  if(e.key === 'ArrowRight') document.getElementById('next').click();
+  else if(e.key === 'ArrowLeft') document.getElementById('prev').click();
+  else if(e.key === ' '){ e.preventDefault(); document.getElementById('playpause').click(); }
+  else if(e.key === 'r' || e.key === 'R') document.getElementById('restart').click();
+});
+
+// "Start Safety" → leave the onboarding and open the Home Screen. When the
+// animation is embedded inside the app shell (?embed=1), post a message to
+// the parent so it can navigate/finish; otherwise navigate this page
+// directly to normal.html.
+document.getElementById('startbtn').addEventListener('click', () => {
+  const embedded = new URLSearchParams(location.search).get('embed') === '1';
+  if (embedded && window.parent && window.parent !== window) {
+    window.parent.postMessage({ type: 'vigil:start-safety' }, '*');
+  } else {
+    window.location.href = 'normal.html';
+  }
+});
+</script>
+</body>
+</html>
